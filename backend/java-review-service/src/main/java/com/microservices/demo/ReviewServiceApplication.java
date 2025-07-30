@@ -1,0 +1,1 @@
+package com.microservices.demo;nnimport org.springframework.boot.SpringApplication;nimport org.springframework.boot.autoconfigure.SpringBootApplication;nn@SpringBootApplicationnpublic class ReviewServiceApplication {nn    public static void main(String[] args) {n        SpringApplication.run(ReviewServiceApplication.class, args);n    }nn}
