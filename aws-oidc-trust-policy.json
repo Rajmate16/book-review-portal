@@ -1,1 +1,1 @@
-<file-content-placeholder>
+{n  "Version": "2012-10-17",n  "Statement": [n    {n      "Effect": "Allow",n      "Principal": {n        "Federated": "arn:aws:iam::YOUR_AWS_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"n      },n      "Action": "sts:AssumeRoleWithWebIdentity",n      "Condition": {n        "StringEquals": {n          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"n        },n        "StringLike": {n          "token.actions.githubusercontent.com:sub": "repo:Rajmate16/book-review-portal:*"n        }n      }n    }n  ]n}
