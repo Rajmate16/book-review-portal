@@ -39,6 +39,14 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Check Terraform Files
+      working-directory: ./terraform
+      run: |
+        if [ ! -d "./terraform" ] || [ -z "$(ls -A ./terraform/*.tf)" ]; then
+          echo "Error: No Terraform files found in ./terraform directory"
+          exit 1
+        fi
+
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -53,26 +61,34 @@ jobs:
     - name: Terraform Init
       working-directory: ./terraform
       run: terraform init
+      continue-on-error: false
 
     - name: Terraform Format Check
       working-directory: ./terraform
       run: terraform fmt -check
+      continue-on-error: false
 
     - name: Terraform Validate
       working-directory: ./terraform
       run: terraform validate
+      continue-on-error: false
 
     - name: Terraform Plan
       working-directory: ./terraform
       run: terraform plan -out=tfplan
       env:
         TF_VAR_environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
+        TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
+        TF_VAR_db_username: ${{ secrets.DB_USERNAME }}
+        TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+      continue-on-error: false
 
     - name: Upload Terraform Plan
       uses: actions/upload-artifact@v4
       with:
         name: terraform-plan
         path: ./terraform/tfplan
+        retention-days: 5
 
   terraform-apply:
     name: Terraform Apply
@@ -104,12 +120,17 @@ jobs:
     - name: Terraform Init
       working-directory: ./terraform
       run: terraform init
+      continue-on-error: false
 
     - name: Terraform Apply
       working-directory: ./terraform
       run: terraform apply -auto-approve tfplan
       env:
         TF_VAR_environment: production
+        TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
+        TF_VAR_db_username: ${{ secrets.DB_USERNAME }}
+        TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+      continue-on-error: false
 
   terraform-destroy:
     name: Terraform Destroy (Manual)
@@ -134,9 +155,14 @@ jobs:
     - name: Terraform Init
       working-directory: ./terraform
       run: terraform init
+      continue-on-error: false
 
     - name: Terraform Destroy
       working-directory: ./terraform
       run: terraform destroy -auto-approve
       env:
-        TF_VAR_environment: production 
+        TF_VAR_environment: production
+        TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
+        TF_VAR_db_username: ${{ secrets.DB_USERNAME }}
+        TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+      continue-on-error: false
