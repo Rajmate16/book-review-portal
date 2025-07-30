@@ -1,113 +1,116 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import mysql.connector
-import json
-import logging
-from datetime import datetime
 import os
-
-app = Flask(__name__)
-CORS(app)
+import json
+import sqlite3
+# import boto3
+# import pymysql
+import requests
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration
-db_config = {
-    'host': 'localhost',
-    'user': 'root',
-    'password': 'root',
-    'database': 'books_db',
-    'charset': 'utf8mb4',
-    'autocommit': True
-}
+app = Flask(__name__)
+CORS(app)
 
-def get_db_connection():
-    try:
-        connection = mysql.connector.connect(**db_config)
-        return connection
-    except mysql.connector.Error as err:
-        logger.error(f"Database connection error: {err}")
-        return None
+# Configuration from environment variables
+# AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+# DB_SECRET_ARN = os.getenv('DB_SECRET_ARN')
+JAVA_SERVICE_URL = os.getenv('JAVA_SERVICE_URL', 'http://localhost:8080')
 
-def init_database():
-    """Initialize database and create tables if they don't exist"""
+# Local SQLite database for testing
+DATABASE_PATH = 'books.db'
+
+def init_db():
+    """Initialize SQLite database with books table"""
     try:
-        connection = mysql.connector.connect(
-            host=db_config['host'],
-            user=db_config['user'],
-            password=db_config['password']
-        )
-        cursor = connection.cursor()
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
         
-        # Create database if not exists
-        cursor.execute("CREATE DATABASE IF NOT EXISTS books_db")
-        cursor.execute("USE books_db")
-        
-        # Create books table
-        cursor.execute("""
+        # Create books table if it doesn't exist
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS books (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                title VARCHAR(255) NOT NULL,
-                author VARCHAR(255) NOT NULL,
-                isbn VARCHAR(13),
-                publication_year INT,
-                genre VARCHAR(100),
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                author TEXT NOT NULL,
+                isbn TEXT UNIQUE,
+                genre TEXT,
+                publication_year INTEGER,
                 description TEXT,
+                price DECIMAL(10,2),
+                stock_quantity INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
+        ''')
         
-        connection.commit()
-        cursor.close()
-        connection.close()
+        # Insert sample data if table is empty
+        cursor.execute('SELECT COUNT(*) FROM books')
+        if cursor.fetchone()[0] == 0:
+            sample_books = [
+                ('The Great Gatsby', 'F. Scott Fitzgerald', '978-0-7432-7356-5', 'Fiction', 1925, 'A classic American novel', 12.99, 10),
+                ('To Kill a Mockingbird', 'Harper Lee', '978-0-06-112008-4', 'Fiction', 1960, 'A gripping tale of racial injustice and childhood', 13.99, 8),
+                ('1984', 'George Orwell', '978-0-452-28423-4', 'Dystopian Fiction', 1949, 'A dystopian social science fiction novel', 14.99, 15),
+                ('Pride and Prejudice', 'Jane Austen', '978-0-14-143951-8', 'Romance', 1813, 'A romantic novel of manners', 11.99, 12),
+                ('The Catcher in the Rye', 'J.D. Salinger', '978-0-316-76948-0', 'Fiction', 1951, 'A controversial novel about teenage rebellion', 13.50, 5)
+            ]
+            
+            cursor.executemany('''
+                INSERT INTO books (title, author, isbn, genre, publication_year, description, price, stock_quantity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', sample_books)
+        
+        conn.commit()
+        conn.close()
         logger.info("Database initialized successfully")
         
-    except mysql.connector.Error as err:
-        logger.error(f"Database initialization error: {err}")
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
 
-@app.route('/')
-def home():
-    return jsonify({
-        "message": "Book Service API",
-        "version": "1.0.0",
-        "status": "running"
-    })
+def get_db_connection():
+    """Create SQLite database connection"""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        conn.row_factory = sqlite3.Row  # This enables column access by name
+        return conn
+    except Exception as e:
+        logger.error(f"Error connecting to database: {e}")
+        return None
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    try:
+        # Test database connection
+        connection = get_db_connection()
+        if connection:
+            connection.close()
+            db_status = "connected"
+        else:
+            db_status = "disconnected"
+        
+        return jsonify({
+            "status": "healthy",
+            "service": "book-service",
+            "database": db_status,
+            "database_type": "SQLite",
+            "version": "1.0.0"
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e)
+        }), 500
 
 @app.route('/api/books', methods=['GET'])
 def get_books():
-    """Get all books"""
+    """Get all books with pagination support"""
     try:
-        connection = get_db_connection()
-        if not connection:
-            return jsonify({"error": "Database connection failed"}), 500
-        
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM books ORDER BY created_at DESC")
-        books = cursor.fetchall()
-        
-        cursor.close()
-        connection.close()
-        
-        return jsonify(books)
-        
-    except Exception as e:
-        logger.error(f"Error fetching books: {e}")
-        return jsonify({"error": "Internal server error"}), 500
-
-@app.route('/api/books', methods=['POST'])
-def add_book():
-    """Add a new book"""
-    try:
-        data = request.get_json()
-        
-        # Validate required fields
-        required_fields = ['title', 'author']
-        for field in required_fields:
-            if not data.get(field):
-                return jsonify({"error": f"Missing required field: {field}"}), 400
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        offset = (page - 1) * per_page
         
         connection = get_db_connection()
         if not connection:
@@ -115,34 +118,37 @@ def add_book():
         
         cursor = connection.cursor()
         
-        # Insert new book
-        query = """
-            INSERT INTO books (title, author, isbn, publication_year, genre, description)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """
-        values = (
-            data.get('title'),
-            data.get('author'),
-            data.get('isbn'),
-            data.get('publication_year'),
-            data.get('genre'),
-            data.get('description')
+        # Get total count
+        cursor.execute("SELECT COUNT(*) as total FROM books")
+        total = cursor.fetchone()['total']
+        
+        # Get books with pagination
+        cursor.execute(
+            "SELECT * FROM books ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (per_page, offset)
         )
+        books_rows = cursor.fetchall()
         
-        cursor.execute(query, values)
-        book_id = cursor.lastrowid
+        # Convert rows to dictionaries
+        books = []
+        for row in books_rows:
+            book = dict(row)
+            books.append(book)
         
-        cursor.close()
         connection.close()
         
         return jsonify({
-            "message": "Book added successfully",
-            "book_id": book_id
-        }), 201
-        
+            "books": books,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "total_pages": (total + per_page - 1) // per_page
+            }
+        }), 200
     except Exception as e:
-        logger.error(f"Error adding book: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+        logger.error(f"Error getting books: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/books/<int:book_id>', methods=['GET'])
 def get_book(book_id):
@@ -152,91 +158,110 @@ def get_book(book_id):
         if not connection:
             return jsonify({"error": "Database connection failed"}), 500
         
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM books WHERE id = %s", (book_id,))
+        cursor = connection.cursor()
+        cursor.execute("SELECT * FROM books WHERE id = ?", (book_id,))
         book = cursor.fetchone()
         
-        cursor.close()
+        connection.close()
+        
+        if book:
+            return jsonify(dict(book)), 200
+        else:
+            return jsonify({"error": "Book not found"}), 404
+    except Exception as e:
+        logger.error(f"Error getting book {book_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/books', methods=['POST'])
+def create_book():
+    """Create a new book"""
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['title', 'author', 'isbn']
+        for field in required_fields:
+            if field not in data or not data[field].strip():
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+        
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({"error": "Database connection failed"}), 500
+        
+        cursor = connection.cursor()
+        cursor.execute(
+            "INSERT INTO books (title, author, isbn) VALUES (?, ?, ?)",
+            (data['title'].strip(), data['author'].strip(), data['isbn'].strip())
+        )
+        book_id = cursor.lastrowid
+        connection.commit()
+        
+        connection.close()
+        
+        logger.info(f"Created book with ID: {book_id}")
+        return jsonify({
+            "id": book_id,
+            "message": "Book created successfully",
+            "book": {
+                "id": book_id,
+                "title": data['title'].strip(),
+                "author": data['author'].strip(),
+                "isbn": data['isbn'].strip()
+            }
+        }), 201
+    except sqlite3.IntegrityError as e:
+        logger.error(f"Database integrity error: {e}")
+        return jsonify({"error": "Book with this ISBN already exists"}), 409
+    except Exception as e:
+        logger.error(f"Error creating book: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/books/<int:book_id>/reviews', methods=['GET'])
+def get_book_reviews(book_id):
+    """Get reviews for a specific book from Java service"""
+    try:
+        # First check if book exists
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({"error": "Database connection failed"}), 500
+        
+        cursor = connection.cursor()
+        cursor.execute("SELECT id FROM books WHERE id = ?", (book_id,))
+        book = cursor.fetchone()
+        
         connection.close()
         
         if not book:
             return jsonify({"error": "Book not found"}), 404
         
-        return jsonify(book)
+        # Call Java service for reviews
+        java_url = f"{JAVA_SERVICE_URL}/internal/reviews/book/{book_id}"
+        logger.info(f"Calling Java service: {java_url}")
         
+        response = requests.get(java_url, timeout=10)
+        
+        if response.status_code == 200:
+            return jsonify(response.json()), 200
+        elif response.status_code == 404:
+            return jsonify({"reviews": []}), 200
+        else:
+            logger.error(f"Java service error: {response.status_code}")
+            return jsonify({"error": "Failed to fetch reviews from review service"}), 502
+    except requests.RequestException as e:
+        logger.error(f"Error calling Java service: {e}")
+        return jsonify({"error": "Review service unavailable"}), 503
     except Exception as e:
-        logger.error(f"Error fetching book: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+        logger.error(f"Error getting reviews for book {book_id}: {e}")
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/api/books/<int:book_id>', methods=['PUT'])
-def update_book(book_id):
-    """Update a book"""
-    try:
-        data = request.get_json()
-        
-        connection = get_db_connection()
-        if not connection:
-            return jsonify({"error": "Database connection failed"}), 500
-        
-        cursor = connection.cursor()
-        
-        # Update book
-        query = """
-            UPDATE books 
-            SET title = %s, author = %s, isbn = %s, publication_year = %s, genre = %s, description = %s
-            WHERE id = %s
-        """
-        values = (
-            data.get('title'),
-            data.get('author'),
-            data.get('isbn'),
-            data.get('publication_year'),
-            data.get('genre'),
-            data.get('description'),
-            book_id
-        )
-        
-        cursor.execute(query, values)
-        
-        if cursor.rowcount == 0:
-            cursor.close()
-            connection.close()
-            return jsonify({"error": "Book not found"}), 404
-        
-        cursor.close()
-        connection.close()
-        
-        return jsonify({"message": "Book updated successfully"})
-        
-    except Exception as e:
-        logger.error(f"Error updating book: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({"error": "Endpoint not found"}), 404
 
-@app.route('/api/books/<int:book_id>', methods=['DELETE'])
-def delete_book(book_id):
-    """Delete a book"""
-    try:
-        connection = get_db_connection()
-        if not connection:
-            return jsonify({"error": "Database connection failed"}), 500
-        
-        cursor = connection.cursor()
-        cursor.execute("DELETE FROM books WHERE id = %s", (book_id,))
-        
-        if cursor.rowcount == 0:
-            cursor.close()
-            connection.close()
-            return jsonify({"error": "Book not found"}), 404
-        
-        cursor.close()
-        connection.close()
-        
-        return jsonify({"message": "Book deleted successfully"})
-        
-    except Exception as e:
-        logger.error(f"Error deleting book: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == '__main__':
-    init_database()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    init_db() # Initialize database on startup
+    app.run(host='0.0.0.0', port=5000, debug=False)
