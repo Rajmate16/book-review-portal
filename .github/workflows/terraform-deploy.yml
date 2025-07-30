@@ -41,8 +41,9 @@ jobs:
 
     - name: list directory
       run : |
-            ls -la
             cd terraform
+            pwd
+            ls -lrt
             terraform init
             terraform plan
 
