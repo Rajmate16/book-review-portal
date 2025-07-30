@@ -1,1 +1,28 @@
-import React from 'react';nimport { BrowserRouter as Router, Routes, Route } from 'react-router-dom';nimport { Toaster } from 'react-hot-toast';nimport './App.css';nimport BookList from './components/BookList';nimport BookDetail from './components/BookDetail';nimport AddBook from './components/AddBook';nimport Header from './components/Header';nnfunction App() {n  return (n    <Router>n      <div className="App">n        <Header />n        <main className="container mx-auto px-4 py-8">n          <Routes>n            <Route path="/" element={<BookList />} />n            <Route path="/book/:id" element={<BookDetail />} />n            <Route path="/add-book" element={<AddBook />} />n          </Routes>n        </main>n        <Toaster position="top-right" />n      </div>n    </Router>n  );n}nnexport default App;
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
+import './App.css';
+import BookList from './components/BookList';
+import BookDetail from './components/BookDetail';
+import AddBook from './components/AddBook';
+import Header from './components/Header';
+
+function App() {
+  return (
+    <Router>
+      <div className="App">
+        <Header />
+        <main className="container mx-auto px-4 py-8">
+          <Routes>
+            <Route path="/" element={<BookList />} />
+            <Route path="/book/:id" element={<BookDetail />} />
+            <Route path="/add-book" element={<AddBook />} />
+          </Routes>
+        </main>
+        <Toaster position="top-right" />
+      </div>
+    </Router>
+  );
+}
+
+export default App;
