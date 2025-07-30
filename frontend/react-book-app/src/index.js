@@ -1,0 +1,1 @@
+import React from 'react';nimport ReactDOM from 'react-dom/client';nimport './index.css';nimport App from './App';nimport reportWebVitals from './reportWebVitals';nnconst root = ReactDOM.createRoot(document.getElementById('root'));nroot.render(n  <React.StrictMode>n    <App />n  </React.StrictMode>n);nnreportWebVitals();
