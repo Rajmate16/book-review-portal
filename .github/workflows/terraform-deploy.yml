@@ -39,8 +39,11 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: list directory
+      run : ls -la
+
     - name: Check Terraform Files
-      working-directory: ./terraform
+      working-directory: terraform
       run: |
         if [ ! -d "./terraform" ] || [ -z "$(ls -A ./terraform/*.tf)" ]; then
           echo "Error: No Terraform files found in ./terraform directory"
